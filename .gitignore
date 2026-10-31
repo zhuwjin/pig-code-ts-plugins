@@ -1,0 +1,3 @@
+.nsh/
+*.secret
+dist/
