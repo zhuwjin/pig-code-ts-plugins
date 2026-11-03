@@ -1,4 +1,23 @@
 {
   "api_version": 1,
-  "packages": []
+  "packages": [
+    {
+      "id": "com.pigcodets.plugins.moon",
+      "name": "Moon UI",
+      "version": "1.0.0",
+      "directory": "packages/moon-plugin",
+      "description": {
+        "zh-CN": "将发送按钮替换为月亮图标",
+        "en": "Replace the send button with a moon icon"
+      },
+      "digest": "sha256:240c8132c5df5b0681dedec675ea6c0a7981bd602005ed90ea6f55c49716907a",
+      "files": [
+        {
+          "path": "moon-1.0.0-build1.nshpkg",
+          "size": 2649,
+          "sha256": "240c8132c5df5b0681dedec675ea6c0a7981bd602005ed90ea6f55c49716907a"
+        }
+      ]
+    }
+  ]
 }

@@ -17,25 +17,13 @@
     {
       "name": "ui.patch.structure",
       "targets": ["composer.sendButton"]
-    },
-    {
-      "name": "ui.add",
-      "targets": ["main", "settings"]
-    },
-    {
-      "name": "composer.submit",
-      "targets": ["*"]
-    },
-    {
-      "name": "tools.provide",
-      "targets": ["MoonEcho"]
     }
   ],
   "contributions": {
     "api_version": 1,
     "description": {
-      "zh-CN": "修改发送按钮并添加远程界面",
-      "en": "Customize the send button and add remote UI"
+      "zh-CN": "将发送按钮替换为月亮图标",
+      "en": "Replace the send button with a moon icon"
     },
     "ui": [
       {
@@ -44,54 +32,7 @@
         "target": "composer.sendButton",
         "icon": "moon",
         "preserve": ["onPress", "disabled", "accessibilityLabel", "testID"]
-      },
-      {
-        "id": "moon-panel",
-        "kind": "panel",
-        "target": "main",
-        "export": "MoonPanel",
-        "preserve": []
       }
-    ],
-    "tools": [
-      {
-        "name": "MoonEcho",
-        "description": "Returns the supplied text through the remote plugin engine",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "text": { "type": "string" }
-          },
-          "required": ["text"]
-        },
-        "read_only": true,
-        "availability": "static"
-      }
-    ],
-    "themes": [
-      {
-        "id": "moon",
-        "entry": "moon-theme.json"
-      }
-    ],
-    "skills": [
-      {
-        "path": "skills/moon"
-      }
-    ],
-    "config": {
-      "items": [
-        {
-          "key": "greeting",
-          "description": {
-            "en": "Greeting displayed by the moon plugin"
-          },
-          "default": "Hello moon"
-        }
-      ],
-      "read": [],
-      "write": []
-    },
-    "actions": ["provide_themes", "provide_tools", "read_config"]
+    ]
   }
 }
