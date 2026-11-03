@@ -17,3 +17,5 @@ Never commit private keys, `*.secret` files, test credentials or host configurat
 Each package contains its `pig-plugin.json` manifest, compiled NSH code and signed assets. Package id, version and build must match the signed NSH app metadata and the catalog entry. Every release increments `build`.
 
 The Moon example lives in `packages/moon-plugin`. It customizes only `composer.sendButton` with a moon icon. Its signed build 1 artifact is included in `index.json`.
+
+The Token Stats example lives in `packages/token-stats-plugin`. It uses the generic session statistics API and owns all summary and detail popovers; without it, the host shows no turn or session statistics. Its signed build 1 artifact is included in `index.json`.

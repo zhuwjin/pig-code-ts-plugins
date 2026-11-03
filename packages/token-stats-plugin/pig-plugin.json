@@ -1,0 +1,63 @@
+{
+  "apiVersion": 1,
+  "id": "com.pigcodets.plugins.tokenstats",
+  "name": {
+    "zh-CN": "统计信息",
+    "en": "Token Stats"
+  },
+  "version": "1.0.0",
+  "build": 1,
+  "entry": "App.tsx",
+  "minHostVersion": "1.0.0",
+  "protocols": {
+    "ui": 1,
+    "services": 1
+  },
+  "capabilities": [
+    {
+      "name": "ui.patch.structure",
+      "targets": ["message.turnStats", "status.activity", "status.usage", "status.context"]
+    },
+    {
+      "name": "session.read",
+      "targets": ["*"]
+    }
+  ],
+  "contributions": {
+    "api_version": 1,
+    "description": {
+      "zh-CN": "显示会话与回合的 token、速度、缓存和上下文统计",
+      "en": "Show session and turn token, speed, cache and context statistics"
+    },
+    "ui": [
+      {
+        "id": "stats-turn",
+        "kind": "replace",
+        "target": "message.turnStats",
+        "export": "TurnStats",
+        "preserve": []
+      },
+      {
+        "id": "stats-activity",
+        "kind": "replace",
+        "target": "status.activity",
+        "export": "SessionActivity",
+        "preserve": []
+      },
+      {
+        "id": "stats-usage",
+        "kind": "replace",
+        "target": "status.usage",
+        "export": "SessionUsage",
+        "preserve": []
+      },
+      {
+        "id": "stats-context",
+        "kind": "replace",
+        "target": "status.context",
+        "export": "SessionContext",
+        "preserve": []
+      }
+    ]
+  }
+}

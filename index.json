@@ -18,6 +18,24 @@
           "sha256": "240c8132c5df5b0681dedec675ea6c0a7981bd602005ed90ea6f55c49716907a"
         }
       ]
+    },
+    {
+      "id": "com.pigcodets.plugins.tokenstats",
+      "name": "Token Stats",
+      "version": "1.0.0",
+      "directory": "packages/token-stats-plugin",
+      "description": {
+        "zh-CN": "显示会话与回合的 token、速度、缓存和上下文统计",
+        "en": "Show session and turn token, speed, cache and context statistics"
+      },
+      "digest": "sha256:715c88f5b446bcd6a1c25c9efd7e6343a6860f10577ab41ad530fe1cac435de2",
+      "files": [
+        {
+          "path": "token-stats-1.0.0-build1.nshpkg",
+          "size": 49350,
+          "sha256": "715c88f5b446bcd6a1c25c9efd7e6343a6860f10577ab41ad530fe1cac435de2"
+        }
+      ]
     }
   ]
 }
