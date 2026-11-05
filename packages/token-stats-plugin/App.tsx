@@ -1,108 +1,81 @@
-import { host } from "nsh";
+import { effect, host, locale, mount, setColorScheme, signal, Text, View, type JSX } from "nsh";
+import { Button } from "nsh/base";
 
 const params = (host as any).params.plugin;
-const sequences: Record<string, number> = {};
-const openState: Record<string, boolean> = {};
-const modes: Record<string, string> = { activity: "detailed", usage: "detailed", context: "detailed" };
-const MUTED = "#a1a1aa";
-let nodeRegistry: Record<string, any> = {};
-let sessionId = "";
-let locale = params.locale ?? "en";
-let snapshot: any = null;
-let refreshing = false;
-let request = 0;
 
-function send(kind: string, stream: string, body: unknown, requestId?: string): void {
-  sequences[stream] = (sequences[stream] ?? 0) + 1;
-  host.post("plugin.protocol", {
-    protocol: 1,
-    kind,
+function responseValue(response: any): any {
+  if (response?.result?.Err) throw new Error(response.result.Err.message);
+  if (response?.result && "Ok" in response.result) return response.result.Ok;
+  throw new Error("Invalid Host API response");
+}
+
+function call(method: string, payload: unknown, requestId: string): Promise<any> {
+  return (host as any).call("pig.host", {
+    apiVersion: 1,
     instance: params.instance,
-    epoch: params.epoch,
-    stream,
-    sequence: sequences[stream],
-    requestId: requestId ?? null,
-    generation: params.generation,
-    body,
+    surface: params.surface,
+    contribution: params.contribution,
+    revision: params.revision,
+    requestId,
+    method,
+    payload,
   });
 }
 
-function current(message: any): boolean {
-  return message?.protocol === 1 &&
-    message.instance === params.instance &&
-    message.epoch === params.epoch &&
-    message.generation === params.generation;
-}
-
-function node(id: string, kind: string, extra: Record<string, unknown> = {}): any {
-  const value = {
-    id,
-    kind,
-    text: null,
-    exportName: null,
-    testId: null,
-    press: false,
-    children: [],
-    style: {},
-    events: [],
-    props: {},
-    accessibility: {},
-    source: null,
-    ...extra,
-  };
-  nodeRegistry[id] = value;
-  return value;
-}
-
-function text(id: string, value: string, style: Record<string, unknown> = {}, testId?: string): any {
-  return node(id, "text", {
-    text: value,
-    testId,
-    style: { fontSize: 12, color: MUTED, ...style },
+function StatsSurface(props: { render: (session: any) => JSX.Element }): JSX.Element {
+  const appearance = signal(params.appearance ?? "system");
+  const snapshot = signal<any>(null);
+  const failure = signal("");
+  let subscription = "";
+  let snapshotRevision = 0;
+  let disposed = false;
+  host.on("pig.host.environment", (message: any) => appearance.set(message.appearance));
+  host.on("pig.host", (message: any) => {
+    if (message?.surface !== params.surface || message.subscriptionId !== subscription) return;
+    if (message.kind === "session.snapshot" && message.revision > snapshotRevision) {
+      snapshotRevision = message.revision;
+      snapshot.set(message.session);
+    } else if (message.kind === "session.error") {
+      failure.set(message.error?.message ?? "Session subscription failed");
+    } else if (message.kind === "surface.disposed") {
+      failure.set("Surface disposed");
+    }
   });
-}
-
-function view(id: string, children: string[], extra: Record<string, unknown> = {}): any {
-  return node(id, "view", { children, ...extra });
-}
-
-function line(prefix: string, label: string, value: string): any {
-  return view(`${prefix}-line`, [
-    text(`${prefix}-label`, label, { flex: 1 }).id,
-    text(`${prefix}-value`, value, { fontFamily: "monospace" }).id,
-  ], { style: { flexDirection: "row", gap: 12 } });
-}
-
-function detailTitle(prefix: string, title: string): any {
-  return text(`${prefix}-title`, title, { fontSize: 14, fontWeight: "600" });
-}
-
-function emptyExport(name: string): any {
-  return view(name, [], { exportName: name, style: { width: 0, height: 0 } });
-}
-
-function summaryView(name: string, summary: string): any {
-  return view(name, [text(`${name}-summary`, summary, {}, `stats-summary-${name}`).id], {
-    exportName: name,
-    style: { flexDirection: "row", gap: 4 },
+  effect(() => setColorScheme(appearance()));
+  effect(() => {
+    disposed = false;
+    const start = async () => {
+      try {
+        const response = await call("session.subscribe", {}, "stats-session-subscribe");
+        const initial = responseValue(response);
+        if (disposed) {
+          await call("session.unsubscribe", { subscriptionId: initial.subscriptionId }, "stats-session-unsubscribe");
+          return;
+        }
+        subscription = initial.subscriptionId;
+        snapshotRevision = initial.revision;
+        snapshot.set(initial.session);
+      } catch (error) {
+        if (!disposed) failure.set(String(error));
+      }
+    };
+    void start();
+    return () => {
+      disposed = true;
+      if (subscription) {
+        void call("session.unsubscribe", { subscriptionId: subscription }, "stats-session-unsubscribe").catch(() => {});
+      }
+    };
   });
+  return (
+    <View class="text-foreground">
+      {failure() ? <Text role="alert" class="text-xs text-destructive">{failure()}</Text> : props.render(snapshot())}
+    </View>
+  );
 }
 
-function popover(name: string, summary: string, details: any[], align = "start"): any {
-  const trigger = view(`${name}-trigger`, [
-    text(`${name}-summary`, summary, {}, `stats-summary-${name}`).id,
-  ], {
-    accessibility: { role: "button" },
-    style: { flexDirection: "row", gap: 4, paddingHorizontal: 4 },
-  });
-  const content = view(`${name}-content`, details.map((item) => item.id), { style: { gap: 8 } });
-  return node(name, "popover", {
-    exportName: name,
-    testId: `stats-popover-${name}`,
-    events: ["openChange"],
-    props: { open: openState[name] === true, placement: "top", align },
-    children: [trigger.id, content.id],
-  });
+function zh(): boolean {
+  return locale().toLowerCase().startsWith("zh");
 }
 
 function formatTokens(value: number): string {
@@ -129,205 +102,211 @@ function cacheHit(input: number, cacheRead: number): number | null {
   return input + cacheRead > 0 ? cacheRead / (input + cacheRead) * 100 : null;
 }
 
-function zh(): boolean {
-  return locale.toLowerCase().startsWith("zh");
+function currentTurn(session: any): any {
+  const index = params.context?.turnIndex;
+  return session?.turns?.find((turn: any) => turn.index === index) ?? null;
 }
 
-function turnStats(turn: any): any[] {
-  const index = turn.index;
-  const stats = turn.stats;
-  if (!stats) return [emptyExport(`TurnStats:${index}`)];
-  const rate = speed(stats);
-  const speedSummary = rate ? `${rate.toFixed(1)} tok/s` : compactDuration(turn.durationMs);
-  const tokenSummary = `${formatTokens(stats.input + stats.cache_read + stats.output)} tok`;
-  const speedDetails = [
-    detailTitle(`turn-${index}-speed`, zh() ? "解码速度" : "Decode speed"),
-    line(`turn-${index}-speed-duration`, zh() ? "耗时" : "Duration", duration(turn.durationMs)),
-    line(`turn-${index}-speed-steps`, zh() ? "API 步数" : "API steps", String(stats.api_steps)),
-    line(`turn-${index}-speed-model`, zh() ? "模型耗时" : "Model time", compactDuration(stats.api_ms)),
-    line(`turn-${index}-speed-first`, zh() ? "首个 token" : "First token", stats.ttft_steps ? compactDuration(stats.ttft_ms / stats.ttft_steps) : "—"),
-    line(`turn-${index}-speed-tool`, zh() ? "工具耗时" : "Tool time", compactDuration(stats.tool_ms)),
-    line(`turn-${index}-speed-rate`, zh() ? "解码速度" : "Decode speed", rate ? `${rate.toFixed(1)} tok/s` : "—"),
-  ];
-  const hit = cacheHit(stats.input, stats.cache_read);
-  const usageDetails = [
-    detailTitle(`turn-${index}-usage`, zh() ? "Token 用量" : "Token usage"),
-    line(`turn-${index}-usage-input`, zh() ? "输入" : "Input", stats.input.toLocaleString()),
-    line(`turn-${index}-usage-cache`, zh() ? "缓存读取" : "Cache read", stats.cache_read.toLocaleString()),
-    line(`turn-${index}-usage-output`, zh() ? "输出" : "Output", stats.output.toLocaleString()),
-    line(`turn-${index}-usage-hit`, zh() ? "缓存命中" : "Cache hit", hit == null ? "—" : `${hit.toFixed(1)}%`),
-  ];
-  return [
-    popover(`TurnStats:${index}:speed`, `↶ ${speedSummary}`, speedDetails),
-    popover(`TurnStats:${index}:usage`, `▤ ${tokenSummary}`, usageDetails),
-  ];
+function openDetail(contribution: string): void {
+  const anchor = params.contribution === "stats-turn" ? "message.turnStats" : params.contribution.replace("stats-", "status.");
+  void call("navigation.open", {
+    pageId: "overlay",
+    contribution,
+    anchor,
+    turnId: params.context?.turnId ?? null,
+    turnIndex: params.context?.turnIndex ?? null,
+  }, `stats-overlay-${contribution}`).catch((error: unknown) => console.error(error));
 }
 
-function turnExport(turn: any): any {
-  return view(`TurnStats:${turn.index}`, turnStats(turn).map((item) => item.id), {
-    exportName: `TurnStats:${turn.index}`,
-    style: { flexDirection: "row", gap: 8 },
-  });
-}
-
-function sessionActivity(stats: any): any {
-  if (modes.activity === "hidden") return emptyExport("SessionActivity");
-  const rate = stats.decodeMs > 0 ? stats.output / (stats.decodeMs / 1000) : null;
-  const turnsSteps = zh() ? `${stats.turns} 回合 · ${stats.steps} 步` : `${stats.turns} turns · ${stats.steps} steps`;
-  const summary = `↶ ${turnsSteps}${rate ? ` · ${Math.round(rate)} tok/s` : ""}`;
-  if (modes.activity === "compact") return summaryView("SessionActivity", summary);
-  const details = [
-    detailTitle("session-activity", zh() ? "会话活动" : "Session activity"),
-    line("session-activity-turns", zh() ? "完成回合" : "Completed turns", String(stats.turns)),
-    line("session-activity-steps", zh() ? "API 步数" : "API steps", String(stats.steps)),
-    line("session-activity-model", zh() ? "模型耗时" : "Model time", compactDuration(stats.apiMs)),
-    line("session-activity-tool", zh() ? "工具耗时" : "Tool time", compactDuration(stats.toolMs)),
-    line("session-activity-first", zh() ? "平均首个 token" : "Average first token", stats.ttftSteps ? compactDuration(stats.ttftMs / stats.ttftSteps) : "—"),
-    line("session-activity-rate", zh() ? "解码速度" : "Decode speed", rate ? `${rate.toFixed(1)} tok/s` : "—"),
-  ];
-  const children: string[] = [];
-  if (stats.running) {
-    children.push(text("session-running", zh() ? "正在生成" : "Generating", { color: "#30a46c" }).id);
-    if (stats.outputRate > 0) children.push(text("session-running-rate", `≈ ${stats.outputRate} token/s`).id);
+function SummaryPill(props: { id: string; icon: string; text: string; detail: string; mode?: string }): JSX.Element {
+  if (props.mode === "compact") {
+    return <Text testID={props.id} class="px-1 text-xs text-muted-foreground">{`${props.icon} ${props.text}`}</Text>;
   }
-  if (stats.turns > 0) children.push(popover("SessionActivity", summary, details, "center").id);
-  return view("SessionActivityRoot", children, {
-    exportName: "SessionActivity",
-    style: { flexDirection: "row", gap: 8, alignItems: "center" },
-  });
+  return (
+    <Button
+      testID={props.id}
+      class="h-6 gap-1 rounded-full px-2 text-xs text-muted-foreground hover:bg-accent"
+      onPress={() => openDetail(props.detail)}
+    >
+      <Text>{props.icon}</Text>
+      <Text>{props.text}</Text>
+    </Button>
+  );
 }
 
-function sessionUsage(stats: any): any {
-  const usage = stats.usage;
-  if (!usage || modes.usage === "hidden") return emptyExport("SessionUsage");
-  const totalInput = usage.inputTotal + usage.cacheReadTotal + stats.output;
+function ActivitySummary({ session }: { session: any }): JSX.Element {
+  const stats = session?.stats;
+  if (!stats) return <View />;
+  const rate = stats.decodeMs > 0 ? stats.output / (stats.decodeMs / 1000) : null;
+  if (params.context?.displayMode === "compact") {
+    return rate ? <SummaryPill id="stats-summary-SessionActivity" icon="↶" text={`${Math.round(rate)} tok/s`} detail="stats-activity-detail" mode="compact" /> : <View />;
+  }
+  const turnsSteps = zh() ? `${stats.turns} 回合 · ${stats.steps} 步` : `${stats.turns} turns · ${stats.steps} steps`;
+  const summary = `${turnsSteps}${rate ? ` · ${Math.round(rate)} tok/s` : ""}`;
+  return (
+    <View class="flex-row items-center gap-2">
+      {stats.turns > 0 ? <SummaryPill id="stats-summary-SessionActivity" icon="↶" text={summary} detail="stats-activity-detail" /> : null}
+      {stats.running ? <Text class="text-xs text-success">{zh() ? "正在生成" : "Generating"}</Text> : null}
+      {stats.running && stats.outputRate > 0 ? <Text class="text-xs text-muted-foreground">{`≈ ${stats.outputRate} token/s`}</Text> : null}
+    </View>
+  );
+}
+
+function UsageSummary({ session }: { session: any }): JSX.Element {
+  const usage = session?.stats?.usage;
+  if (!usage) return <View />;
+  const output = session.stats.output;
+  const totalInput = usage.inputTotal + usage.cacheReadTotal + output;
   const hit = cacheHit(usage.inputTotal, usage.cacheReadTotal);
+  if (params.context?.displayMode === "compact") {
+    return hit == null ? <View /> : <SummaryPill id="stats-summary-SessionUsage" icon="▤" text={`${zh() ? "缓存" : "cache"} ${hit.toFixed(1)}%`} detail="stats-usage-detail" mode="compact" />;
+  }
   const cache = hit == null ? "" : ` · ${zh() ? "缓存" : "cache"} ${hit.toFixed(1)}%`;
-  const summary = `▤ ${formatTokens(totalInput)} tokens${cache}`;
-  if (modes.usage === "compact") return summaryView("SessionUsage", summary);
-  return popover("SessionUsage", summary, [
-    detailTitle("session-usage", zh() ? "Token 用量" : "Token usage"),
-    line("session-usage-input", zh() ? "输入" : "Input", usage.inputTotal.toLocaleString()),
-    line("session-usage-cache", zh() ? "缓存读取" : "Cache read", usage.cacheReadTotal.toLocaleString()),
-    line("session-usage-output", zh() ? "输出" : "Output", stats.output.toLocaleString()),
-    line("session-usage-hit", zh() ? "缓存命中" : "Cache hit", hit == null ? "—" : `${hit.toFixed(1)}%`),
-  ], "center");
+  return <SummaryPill id="stats-summary-SessionUsage" icon="▤" text={`${formatTokens(totalInput)} tokens${cache}`} detail="stats-usage-detail" />;
 }
 
-function sessionContext(stats: any): any {
-  const usage = stats.usage;
-  if (!usage || modes.context === "hidden") return emptyExport("SessionContext");
+function ContextSummary({ session }: { session: any }): JSX.Element {
+  const usage = session?.stats?.usage;
+  if (!usage) return <View />;
   const ratio = Math.min(1, usage.used / Math.max(1, usage.total));
   const percent = Math.round(ratio * 100);
-  const summary = `◯ ${percent}%`;
-  if (modes.context === "compact") return summaryView("SessionContext", summary);
+  return <SummaryPill id="stats-summary-SessionContext" icon="◯" text={`${percent}%`} detail="stats-context-detail" mode={params.context?.displayMode} />;
+}
+
+function TurnSummary({ session }: { session: any }): JSX.Element {
+  const turn = currentTurn(session);
+  if (!turn?.stats) return <View />;
+  const rate = speed(turn.stats);
+  const speedSummary = rate ? `${rate.toFixed(1)} tok/s` : compactDuration(turn.durationMs);
+  const tokenSummary = `${formatTokens(turn.stats.input + turn.stats.cache_read + turn.stats.output)} tok`;
+  return (
+    <View class="flex-row items-center gap-1">
+      <SummaryPill id={`stats-summary-TurnStats:${turn.index}:speed`} icon="↶" text={speedSummary} detail="stats-turn-speed-detail" />
+      <SummaryPill id={`stats-summary-TurnStats:${turn.index}:usage`} icon="▤" text={tokenSummary} detail="stats-turn-usage-detail" />
+    </View>
+  );
+}
+
+function StatLine(props: { id: string; label: string; value: string }): JSX.Element {
+  return (
+    <View testID={`${props.id}-line`} class="flex-row items-center gap-3">
+      <Text testID={`${props.id}-label`} class="flex-1 text-xs text-muted-foreground">{props.label}</Text>
+      <Text testID={`${props.id}-value`} class="font-mono text-xs text-foreground">{props.value}</Text>
+    </View>
+  );
+}
+
+function DetailPanel(props: { id: string; icon: string; title: string; value?: string; children: JSX.Element }): JSX.Element {
+  return (
+    <View class="gap-2 bg-popover p-3 text-foreground">
+      <View class="flex-row items-center gap-2">
+        <Text class="text-muted-foreground">{props.icon}</Text>
+        <Text class="text-sm font-medium">{props.title}</Text>
+        <View class="flex-1" />
+        {props.value ? <Text class="font-mono text-sm font-medium">{props.value}</Text> : null}
+      </View>
+      <View class="h-px bg-border" />
+      <View class="gap-2">{props.children}</View>
+    </View>
+  );
+}
+
+function ActivityDetail({ session }: { session: any }): JSX.Element {
+  const stats = session?.stats;
+  if (!stats) return <View />;
+  const rate = stats.decodeMs > 0 ? stats.output / (stats.decodeMs / 1000) : null;
+  return (
+    <DetailPanel id="composer-activity-popup" icon="↶" title={zh() ? "会话活动" : "Session activity"}>
+      <StatLine id="session-activity-turns" label={zh() ? "完成回合" : "Completed turns"} value={String(stats.turns)} />
+      <StatLine id="session-activity-steps" label={zh() ? "API 步数" : "API steps"} value={String(stats.steps)} />
+      <StatLine id="session-activity-model" label={zh() ? "模型耗时" : "Model time"} value={compactDuration(stats.apiMs)} />
+      <StatLine id="session-activity-tool" label={zh() ? "工具耗时" : "Tool time"} value={compactDuration(stats.toolMs)} />
+      <StatLine id="session-activity-first" label={zh() ? "平均首个 token" : "Average first token"} value={stats.ttftSteps ? compactDuration(stats.ttftMs / stats.ttftSteps) : "—"} />
+      <StatLine id="session-activity-rate" label={zh() ? "解码速度" : "Decode speed"} value={rate ? `${rate.toFixed(1)} tok/s` : "—"} />
+    </DetailPanel>
+  );
+}
+
+function UsageDetail({ session }: { session: any }): JSX.Element {
+  const usage = session?.stats?.usage;
+  if (!usage) return <View />;
+  const output = session.stats.output;
+  const total = usage.inputTotal + usage.cacheReadTotal + output;
+  const hit = cacheHit(usage.inputTotal, usage.cacheReadTotal);
+  return (
+    <DetailPanel id="composer-usage-popup" icon="▤" title={zh() ? "Token 用量" : "Token usage"} value={`${total.toLocaleString()} tokens`}>
+      <StatLine id="session-usage-hit" label={zh() ? "缓存命中" : "Cache hit"} value={hit == null ? "—" : `${hit.toFixed(1)}%`} />
+      <StatLine id="session-usage-input" label={zh() ? "输入" : "Input"} value={usage.inputTotal.toLocaleString()} />
+      <StatLine id="session-usage-cache" label={zh() ? "缓存读取" : "Cache read"} value={usage.cacheReadTotal.toLocaleString()} />
+      <StatLine id="session-usage-output" label={zh() ? "输出" : "Output"} value={output.toLocaleString()} />
+    </DetailPanel>
+  );
+}
+
+function ContextDetail({ session }: { session: any }): JSX.Element {
+  const usage = session?.stats?.usage;
+  if (!usage) return <View />;
+  const ratio = Math.min(1, usage.used / Math.max(1, usage.total));
   const filled = Math.round(ratio * 10);
   const progress = `${"▰".repeat(filled)}${"▱".repeat(10 - filled)}`;
-  const details = [
-    detailTitle("session-context", zh() ? "上下文已用" : "Context used") ,
-    line("session-context-total", zh() ? "总量" : "Total", `~${formatTokens(usage.used)} / ${formatTokens(usage.total)}`),
-    text("session-context-progress", progress),
-  ];
-  const breakdown = stats.breakdown;
-  if (breakdown) {
-    details.push(
-      line("session-context-system", zh() ? "系统提示" : "System prompt", `~${formatTokens(breakdown.system)}`),
-      line("session-context-tools", zh() ? "工具定义" : "Tool schemas", `~${formatTokens(breakdown.tools)}`),
-      line("session-context-messages", zh() ? "消息" : "Messages", `~${formatTokens(breakdown.messages)}`),
+  const breakdown = session.stats.breakdown;
+  return (
+    <DetailPanel id="composer-context-popup" icon="◯" title={zh() ? "上下文已用" : "Context used"}>
+      <StatLine id="session-context-total" label={zh() ? "总量" : "Total"} value={`~${formatTokens(usage.used)} / ${formatTokens(usage.total)}`} />
+      <Text testID="session-context-progress" class={ratio > 0.8 ? "text-warning" : "text-muted-foreground"}>{progress}</Text>
+      {breakdown ? (
+        <View class="gap-2">
+          <StatLine id="session-context-system" label={zh() ? "系统提示" : "System prompt"} value={`~${formatTokens(breakdown.system)}`} />
+          <StatLine id="session-context-tools" label={zh() ? "工具定义" : "Tool schemas"} value={`~${formatTokens(breakdown.tools)}`} />
+          <StatLine id="session-context-messages" label={zh() ? "消息" : "Messages"} value={`~${formatTokens(breakdown.messages)}`} />
+        </View>
+      ) : null}
+    </DetailPanel>
+  );
+}
+
+function TurnDetail({ session, usage }: { session: any; usage: boolean }): JSX.Element {
+  const turn = currentTurn(session);
+  if (!turn?.stats) return <View />;
+  const stats = turn.stats;
+  const rate = speed(stats);
+  const hit = cacheHit(stats.input, stats.cache_read);
+  if (usage) {
+    const total = stats.input + stats.cache_read + stats.output;
+    return (
+      <DetailPanel id={`turn-usage-panel-${turn.index}`} icon="▤" title={zh() ? "Token 用量" : "Token usage"} value={`${total.toLocaleString()} tokens`}>
+        <StatLine id={`turn-${turn.index}-usage-hit`} label={zh() ? "缓存命中" : "Cache hit"} value={hit == null ? "—" : `${hit.toFixed(1)}%`} />
+        <StatLine id={`turn-${turn.index}-usage-input`} label={zh() ? "输入" : "Input"} value={stats.input.toLocaleString()} />
+        <StatLine id={`turn-${turn.index}-usage-cache`} label={zh() ? "缓存读取" : "Cache read"} value={stats.cache_read.toLocaleString()} />
+        <StatLine id={`turn-${turn.index}-usage-output`} label={zh() ? "输出" : "Output"} value={stats.output.toLocaleString()} />
+      </DetailPanel>
     );
   }
-  return popover("SessionContext", summary, details, "center");
+  return (
+    <DetailPanel id={`turn-speed-panel-${turn.index}`} icon="↶" title={zh() ? "解码速度" : "Decode speed"}>
+      <StatLine id={`turn-${turn.index}-speed-duration`} label={zh() ? "耗时" : "Duration"} value={duration(turn.durationMs)} />
+      <StatLine id={`turn-${turn.index}-speed-steps`} label={zh() ? "API 步数" : "API steps"} value={String(stats.api_steps)} />
+      <StatLine id={`turn-${turn.index}-speed-model`} label={zh() ? "模型耗时" : "Model time"} value={compactDuration(stats.api_ms)} />
+      <StatLine id={`turn-${turn.index}-speed-first`} label={zh() ? "首个 token" : "First token"} value={stats.ttft_steps ? compactDuration(stats.ttft_ms / stats.ttft_steps) : "—"} />
+      <StatLine id={`turn-${turn.index}-speed-tool`} label={zh() ? "工具耗时" : "Tool time"} value={compactDuration(stats.tool_ms)} />
+      <StatLine id={`turn-${turn.index}-speed-rate`} label={zh() ? "解码速度" : "Decode speed"} value={rate ? `${rate.toFixed(1)} tok/s` : "—"} />
+    </DetailPanel>
+  );
 }
 
-function buildNodes(): any[] {
-  nodeRegistry = {};
-  if (!snapshot?.session) return [];
-  const stats = snapshot.session.stats;
-  sessionActivity(stats);
-  sessionUsage(stats);
-  sessionContext(stats);
-  for (const turn of snapshot.session.turns) turnExport(turn);
-  return Object.values(nodeRegistry);
-}
-
-function commit(): void {
-  const nodes = buildNodes();
-  const parents = new Set(nodes.flatMap((item) => item.children));
-  const roots = nodes.filter((item) => !parents.has(item.id)).map((item) => item.id).sort();
-  send("ui.commit", "ui", {
-    instance: params.instance,
-    epoch: params.epoch,
-    generation: params.generation,
-    sequence: 1,
-    baseRevision: 0,
-    nodes,
-    roots,
-    warnings: [],
-  });
-}
-
-function refresh(): void {
-  if (!sessionId || refreshing) return;
-  refreshing = true;
-  request += 1;
-  send("service.request", "services", {
-    service: "session_read",
-    sessionId,
-    payload: {},
-  }, `stats-${request}`);
-}
-
-host.on("plugin.protocol", (message: any) => {
-  if (!current(message)) return;
-  if (message.kind === "lifecycle.start") {
-    send("lifecycle.ready", "lifecycle", { accepted: true });
-    commit();
-    refresh();
-  } else if (message.kind === "lifecycle.health") {
-    send("lifecycle.health", "lifecycle", { token: message.body.token });
-  } else if (message.kind === "ui.event") {
-    const body = message.body;
-    if (body.kind === "context") {
-      const nextSession = String(body.payload?.sessionId ?? "");
-      const contribution = String(body.contribution ?? "");
-      const mode = contribution === "stats-activity" ? "activity"
-        : contribution === "stats-usage" ? "usage"
-        : contribution === "stats-context" ? "context"
-        : null;
-      const nextMode = mode ? String(body.payload?.mode ?? "detailed") : null;
-      const modeChanged = mode && nextMode && modes[mode] !== nextMode;
-      if (mode && nextMode) modes[mode] = nextMode;
-      if (nextSession !== sessionId) {
-        sessionId = nextSession;
-        snapshot = null;
-        commit();
-        refresh();
-      } else if (modeChanged) {
-        commit();
-      }
-    } else if (body.kind === "openChange") {
-      openState[body.node] = body.payload?.open === true;
-      commit();
-    }
-  } else if (message.kind === "service.response" && String(message.requestId ?? "").startsWith("stats-")) {
-    refreshing = false;
-    const result = message.body.result;
-    const value = result?.Ok ?? result;
-    if (value?.session?.id === sessionId) {
-      snapshot = value;
-      commit();
-    }
-  } else if (message.kind === "service.event" && message.body.name === "locale.changed") {
-    locale = message.body.locale;
-    commit();
+export default function App() {
+  switch (params.contribution) {
+    case "stats-activity": return <StatsSurface render={(session) => <ActivitySummary session={session} />} />;
+    case "stats-usage": return <StatsSurface render={(session) => <UsageSummary session={session} />} />;
+    case "stats-context": return <StatsSurface render={(session) => <ContextSummary session={session} />} />;
+    case "stats-turn": return <StatsSurface render={(session) => <TurnSummary session={session} />} />;
+    case "stats-activity-detail": return <StatsSurface render={(session) => <ActivityDetail session={session} />} />;
+    case "stats-usage-detail": return <StatsSurface render={(session) => <UsageDetail session={session} />} />;
+    case "stats-context-detail": return <StatsSurface render={(session) => <ContextDetail session={session} />} />;
+    case "stats-turn-speed-detail": return <StatsSurface render={(session) => <TurnDetail session={session} usage={false} />} />;
+    case "stats-turn-usage-detail": return <StatsSurface render={(session) => <TurnDetail session={session} usage={true} />} />;
+    default: return <Text>Unknown Surface contribution</Text>;
   }
-});
+}
 
-send("lifecycle.hello", "lifecycle", {
-  uiProtocol: 1,
-  servicesProtocol: 1,
-  requiredFeatures: (2 ** 0) + (2 ** 10) + (2 ** 15),
-  optionalFeatures: (2 ** 6),
-});
-
-setInterval(refresh, 500);
+mount(App);

@@ -5,8 +5,8 @@
     "zh-CN": "统计信息",
     "en": "Token Stats"
   },
-  "version": "1.0.0",
-  "build": 1,
+  "version": "1.1.0",
+  "build": 2,
   "entry": "App.tsx",
   "minHostVersion": "1.0.0",
   "protocols": {
@@ -16,46 +16,76 @@
   "capabilities": [
     {
       "name": "ui.patch.structure",
-      "targets": ["message.turnStats", "status.activity", "status.usage", "status.context"]
+      "targets": ["message.turnStats", "status.activity", "status.usage", "status.context", "plugin.overlay"]
     },
     {
       "name": "session.read",
       "targets": ["*"]
+    },
+    {
+      "name": "navigation.open",
+      "targets": ["overlay"]
     }
   ],
   "contributions": {
     "api_version": 1,
     "description": {
-      "zh-CN": "显示会话与回合的 token、速度、缓存和上下文统计",
-      "en": "Show session and turn token, speed, cache and context statistics"
+      "zh-CN": "以原生 Surface 显示会话与回合的 token、速度、缓存和上下文统计",
+      "en": "Show session and turn token, speed, cache and context statistics in native surfaces"
     },
     "ui": [
       {
         "id": "stats-turn",
-        "kind": "replace",
+        "kind": "surface",
         "target": "message.turnStats",
-        "export": "TurnStats",
         "preserve": []
       },
       {
         "id": "stats-activity",
-        "kind": "replace",
+        "kind": "surface",
         "target": "status.activity",
-        "export": "SessionActivity",
         "preserve": []
       },
       {
         "id": "stats-usage",
-        "kind": "replace",
+        "kind": "surface",
         "target": "status.usage",
-        "export": "SessionUsage",
         "preserve": []
       },
       {
         "id": "stats-context",
-        "kind": "replace",
+        "kind": "surface",
         "target": "status.context",
-        "export": "SessionContext",
+        "preserve": []
+      },
+      {
+        "id": "stats-turn-speed-detail",
+        "kind": "surface",
+        "target": "plugin.overlay",
+        "preserve": []
+      },
+      {
+        "id": "stats-turn-usage-detail",
+        "kind": "surface",
+        "target": "plugin.overlay",
+        "preserve": []
+      },
+      {
+        "id": "stats-activity-detail",
+        "kind": "surface",
+        "target": "plugin.overlay",
+        "preserve": []
+      },
+      {
+        "id": "stats-usage-detail",
+        "kind": "surface",
+        "target": "plugin.overlay",
+        "preserve": []
+      },
+      {
+        "id": "stats-context-detail",
+        "kind": "surface",
+        "target": "plugin.overlay",
         "preserve": []
       }
     ]
